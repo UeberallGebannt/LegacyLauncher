@@ -1,6 +1,7 @@
 package net.minecraft.launchwrapper;
 
 import java.io.*;
+import java.lang.reflect.Method;
 import java.net.JarURLConnection;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -22,6 +23,8 @@ public class LaunchClassLoader extends URLClassLoader {
     public static final int BUFFER_SIZE = 1 << 12;
     private List<URL> sources;
     private ClassLoader parent = getClass().getClassLoader();
+    private List<ClassLoader> childs = new ArrayList<ClassLoader>(); // Add child conscience (Terrainwax)
+    private ClassLoader from = null; // Add child conscience (Terrainwax)
 
     private List<IClassTransformer> transformers = new ArrayList<IClassTransformer>(2);
     private Map<String, Class<?>> cachedClasses = new ConcurrentHashMap<String, Class<?>>();
@@ -90,9 +93,19 @@ public class LaunchClassLoader extends URLClassLoader {
             LogWrapper.log(Level.ERROR, e, "A critical problem occurred registering the ASM transformer class %s", transformerClassName);
         }
     }
-
+    // Add child conscience (Terrainwax)
+    public void addChild(ClassLoader child) {
+        if (!this.childs.contains(child))
+            this.childs.add(child);
+    }
+    // Terrainwax end
+    
     @Override
     public Class<?> findClass(final String name) throws ClassNotFoundException {
+        // Add child conscience (Terrainwax)
+        if (this.equals(from))
+            return null;
+        // Terrainwax end
         if (invalidClasses.contains(name)) {
             throw new ClassNotFoundException(name);
         }
@@ -177,6 +190,31 @@ public class LaunchClassLoader extends URLClassLoader {
             cachedClasses.put(transformedName, clazz);
             return clazz;
         } catch (Throwable e) {
+            // Add child conscience (Terrainwax)
+            if (!childs.isEmpty()) {
+
+                from = this;
+                for (ClassLoader child : childs) {
+                    final String transformedName = transformName(name);
+
+                    try {
+                        Method find = child.getClass().getDeclaredMethod("findClass", String.class);
+                        find.setAccessible(true);
+                        Class<?> clazz = (Class<?>) find.invoke(child, transformedName);
+                        if (clazz != null) {
+                            cachedClasses.put(name, clazz);
+                            from = null;
+                            return clazz;
+                        }
+                    } catch(Exception e1) {
+                        from = null;
+                    }
+                }
+
+                from = null;
+            }
+            // Terrainwax end
+
             invalidClasses.add(name);
             if (DEBUG) {
                 LogWrapper.log(Level.TRACE, e, "Exception encountered attempting classloading of %s", name);
